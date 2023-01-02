@@ -90,21 +90,36 @@ def whitespace_tokenize(text):
 class FullTokenizer(object):
     """Runs end-to-end tokenziation."""
 
-    def __init__(self, vocab_file, tokenize_method, do_lower_case=True):
+    def __init__(self, vocab_file, tokenize_method, do_lower_case=True, do_basic_tokenize=True):
         self.vocab = load_vocab(vocab_file)
+        #FullTokenizer.add_tokens(['<number>', '<date>', '<time>', '<percent>'], self.vocab)
+
         self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case)
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, tokenize_method=tokenize_method)
+        self.do_basic_tokenize = do_basic_tokenize
+        self.tokenize_method = tokenize_method
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, tokenize_method=self.tokenize_method)
 
     def tokenize(self, text):
         split_tokens = []
-        for token in self.basic_tokenizer.tokenize(text):
-            for sub_token in self.wordpiece_tokenizer.tokenize(token):
+        if self.do_basic_tokenize:
+            for token in self.basic_tokenizer.tokenize(text):
+                for sub_token in self.wordpiece_tokenizer.tokenize(token):
+                    split_tokens.append(sub_token)
+        else:
+            for sub_token in self.wordpiece_tokenizer.tokenize(text):
                 split_tokens.append(sub_token)
 
         return split_tokens
 
     def convert_tokens_to_ids(self, tokens):
         return convert_tokens_to_ids(self.vocab, tokens)
+
+    @staticmethod
+    def add_tokens(tokens,vocab):
+        last_index = max(vocab.values()) +1
+        for i,token in enumerate(tokens):
+            new_index = last_index + i
+            vocab[token] = new_index
 
 
 class BasicTokenizer(object):

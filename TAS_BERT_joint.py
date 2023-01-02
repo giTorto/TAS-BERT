@@ -89,6 +89,9 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 			tokens_a = tokenizer.tokenize(example.text_a)
 			ner_labels_a = example.ner_labels_a.strip().split()
 
+		#print(f"Len of tokens_a == ner_label_a - {len(tokens_a)} vs {len(ner_labels_a)}")
+		#print(f"Len of tokens_a == ner_label_a - {tokens_a} vs {ner_labels_a}")
+
 		tokens_b = None
 		if example.text_b:
 			tokens_b = tokenizer.tokenize(example.text_b)
@@ -103,6 +106,9 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 			if len(tokens_a) > max_seq_length - 2:
 				tokens_a = tokens_a[0:(max_seq_length - 2)]
 				ner_labels_a = ner_labels_a[0:(max_seq_length - 2)]
+
+		#print(f"Len of tokens_a == ner_label_a - {len(tokens_a)} vs {len(ner_labels_a)}")
+		#print(f"Len of tokens_a == ner_label_a - {tokens_a} vs {ner_labels_a}")
 
 		# The convention in BERT is:
 		# (a) For sequence pairs:
@@ -133,15 +139,23 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 				tokens.append(token)
 				segment_ids.append(0)
 				ner_label_ids.append(ner_label_map[ner_labels_a[i]])
-		except:
+		except Exception as e:
 			print(tokens_a)
 			print(ner_labels_a)
+			print(ner_label_map)
+			raise e
+
+		#print(f"Len of tokens == ner_label_ids - {len(tokens)} vs {len(ner_label_ids)}")
+		#print(f"Len of tokens == ner_label_ids - {tokens} vs {ner_label_ids}")
 
 		ner_mask = [1] * len(ner_label_ids)
 		token_length = len(tokens)
 		tokens.append("[SEP]")
 		segment_ids.append(0)
 		ner_label_ids.append(ner_label_map["[PAD]"])
+
+		#print(f"Len of tokens == ner_label_ids - {len(tokens)} vs {len(ner_label_ids)}")
+		#print(f"Len of tokens == ner_label_ids - {tokens} vs {ner_label_ids}")
 
 		if tokens_b:
 			for token in tokens_b:
@@ -152,7 +166,11 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 			segment_ids.append(1)
 			ner_label_ids.append(ner_label_map["[PAD]"])
 
+		#print(f"Len of tokens == ner_label_ids - {len(tokens)} vs {len(ner_label_ids)}")
+		#print(f"Len of tokens == ner_label_ids - {tokens} vs {ner_label_ids}")
+
 		input_ids = tokenizer.convert_tokens_to_ids(tokens)
+		#print(f"Len of input ids == ner_label_ids - {len(input_ids)} vs {len(ner_label_ids)}")
 
 		# The mask has 1 for real tokens and 0 for padding tokens. Only real
 		# tokens are attended to.
@@ -166,6 +184,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 		while len(ner_mask) < max_seq_length:
 			ner_mask.append(0)
 
+		#print(f"Len of input ids == ner_label_ids - {len(input_ids)} vs {len(ner_label_ids)}")
 		assert len(input_ids) == max_seq_length
 		assert len(input_mask) == max_seq_length
 		assert len(segment_ids) == max_seq_length
@@ -203,6 +222,22 @@ def _truncate_seq_pair(tokens_a, tokens_b, ner_labels_a, max_length):
 		else:
 			tokens_b.pop()
 
+
+def convert_alberto_state_dict_to_bert(alberto_state_dict):
+	from collections import OrderedDict
+	new_state_dict = OrderedDict()
+	for key, value in alberto_state_dict.items():
+		new_key = key
+		if key.startswith("bert."):
+			new_key = key.replace("bert.","",1)
+
+		new_key = new_key.replace("LayerNorm.bias", "LayerNorm.beta")
+		new_key = new_key.replace("LayerNorm.weight", "LayerNorm.gamma")
+
+		if new_key.startswith("cls."):
+			continue
+		new_state_dict[new_key] = value
+	return new_state_dict
 
 def main():
 	parser = argparse.ArgumentParser()
@@ -286,6 +321,10 @@ def main():
 						default=False,
 						action='store_true',
 						help="Whether not to use CUDA when available")
+	parser.add_argument("--alberto",
+						default=False,
+						action='store_true',
+						help="Whether the model uses alberto")
 	parser.add_argument("--accumulate_gradients",
 						type=int,
 						default=1,
@@ -339,7 +378,8 @@ def main():
 	ner_label_list = processor.get_ner_labels(args.data_dir)    # BIO or TO tags for ner entity
 
 	tokenizer = tokenization.FullTokenizer(
-		vocab_file=args.vocab_file, tokenize_method=args.tokenize_method, do_lower_case=args.do_lower_case)
+		vocab_file=args.vocab_file, tokenize_method=args.tokenize_method, do_lower_case=args.do_lower_case,
+		do_basic_tokenize=False)
 
 	if os.path.exists(args.output_dir) and os.listdir(args.output_dir):
 		raise ValueError("Output directory ({}) already exists and is not empty.".format(args.output_dir))
@@ -398,7 +438,10 @@ def main():
 		model = BertForTABSAJoint(bert_config, len(label_list), len(ner_label_list), args.max_seq_length)
 
 	if args.init_checkpoint is not None:
-		model.bert.load_state_dict(torch.load(args.init_checkpoint, map_location='cpu'))
+		state_dict = torch.load(args.init_checkpoint, map_location='cpu')
+		if args.alberto:
+			state_dict = convert_alberto_state_dict_to_bert(state_dict)
+		model.bert.load_state_dict(state_dict)
 	model.to(device)
 
 	if args.local_rank != -1:
