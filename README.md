@@ -93,6 +93,9 @@ CUDA_VISIBLE_DEVICES=0 python TAS_BERT_joint.py \
 --num_train_epochs 30.0
 ```
 
+```commandline
+CUDA_VISIBLE_DEVICES=0 python TAS_BERT_joint.py --data_dir data/edsa2022/ --output_dir results/edsa2022/BIO/my_result --vocab_file /home/giuliano/TAS-BERT/uncased_italian_bert/alberto_uncased_L-12_H-768_A-12_italian_huggingface.co/vocab.txt --bert_config_file /home/giuliano/TAS-BERT/uncased_italian_bert/alberto_uncased_L-12_H-768_A-12_italian_huggingface.co/config.json --init_checkpoint /home/giuliano/TAS-BERT/uncased_italian_bert/alberto_uncased_L-12_H-768_A-12_italian_huggingface.co/pytorch_model.bin --tokenize_method word_split --use_crf --eval_test --do_lower_case --max_seq_length 128 --train_batch_size 24 --eval_batch_size 8 --learning_rate 2e-5 --num_train_epochs 30.0 --alberto
+```
 The test results for each epoch will be stored in test_ep_*.txt in the output folder.
 
 

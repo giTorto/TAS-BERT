@@ -10,7 +10,7 @@ import tokenization
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
 
-    def __init__(self, guid, text_a, text_b=None, label=None, ner_labels_a=None):
+    def __init__(self, guid, text_a, text_b=None, label=None, ner_labels_a=None, ner_mask=None):
         """Constructs a InputExample.
 
         Args:
@@ -22,6 +22,7 @@ class InputExample(object):
             label: (Optional) string. The label of the example. This should be
             specified for train and dev examples, but not for test examples.
             ner_labels_a: ner tag sequence for text_a. This should be
+            ner_mask: the ner mask provided in the training data
             specified for train and dev examples, but not for test examples.
         """
         self.guid = guid
@@ -29,6 +30,7 @@ class InputExample(object):
         self.text_b = text_b
         self.label = label
         self.ner_labels_a = ner_labels_a
+        self.ner_mask = ner_mask
 
 
 class DataProcessor(object):
@@ -98,7 +100,8 @@ class Semeval_Processor(DataProcessor):
         with open(os.path.join(data_dir, "train_TAS.tsv"), 'r', encoding='utf-8') as fin:
             fin.readline()
             for line in fin:
-                tags = line.strip().split('\t')[-1].split()
+                line_split = line.strip().split('\t')
+                tags = line_split[4].split()
                 for x in tags:
                     if x not in ner_labels:
                         ner_labels.append(x)
@@ -115,6 +118,11 @@ class Semeval_Processor(DataProcessor):
             text_b = tokenization.convert_to_unicode(str(line_arr[2])) # category_polarity
             label = tokenization.convert_to_unicode(str(line_arr[1])) # yes or no
             ner_labels_a = tokenization.convert_to_unicode(str(line_arr[4])) # ner tags
+            ner_mask = len(ner_labels_a)*[1]
+            if len(line_arr) > 5:
+                ner_mask = [int(x) for x in line_arr[5].split(" ")] # ner tags
 
-            examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label, ner_labels_a=ner_labels_a))
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label,
+                             ner_labels_a=ner_labels_a, ner_mask=ner_mask))
         return examples

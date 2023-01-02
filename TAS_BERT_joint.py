@@ -61,26 +61,31 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 
 	features = []
 	all_tokens = []
+	all_ner_masks = []
 	for (ex_index, example) in enumerate(tqdm(examples)):
 		if tokenize_method == "word_split":
+			mask_org = example.ner_mask
 			# word_split
 			word_num = 0
 			tokens_a = tokenizer.tokenize(example.text_a)
 			ner_labels_org = example.ner_labels_a.strip().split()
 			ner_labels_a = []
+			ner_mask_a = []
 			token_bias_num = 0
 
 			for (i, token) in enumerate(tokens_a):
 				if token.startswith('##'):
 					if ner_labels_org[i - 1 - token_bias_num] in ['O', 'T', 'I']:
 						ner_labels_a.append(ner_labels_org[i - 1 - token_bias_num])
+						ner_mask_a.append(mask_org[i - 1 - token_bias_num])
 					else:
 						ner_labels_a.append('I')
+						ner_mask_a.append(1)
 					token_bias_num += 1
 				else:
 					word_num += 1
 					ner_labels_a.append(ner_labels_org[i - token_bias_num])
-
+					ner_mask_a.append(mask_org[i - token_bias_num])
 			assert word_num == len(ner_labels_org)
 			assert len(ner_labels_a) == len(tokens_a)
 
@@ -88,6 +93,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 			# prefix_match or unk_replace
 			tokens_a = tokenizer.tokenize(example.text_a)
 			ner_labels_a = example.ner_labels_a.strip().split()
+			ner_mask_a = example.ner_mask
 
 		#print(f"Len of tokens_a == ner_label_a - {len(tokens_a)} vs {len(ner_labels_a)}")
 		#print(f"Len of tokens_a == ner_label_a - {tokens_a} vs {ner_labels_a}")
@@ -100,12 +106,13 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 			# Modifies `tokens_a` and `tokens_b` in place so that the total
 			# length is less than the specified length.
 			# Account for [CLS], [SEP], [SEP] with "- 3"
-			_truncate_seq_pair(tokens_a, tokens_b, ner_labels_a, max_seq_length - 3)
+			_truncate_seq_pair(tokens_a, tokens_b, ner_labels_a, max_seq_length - 3, ner_mask=ner_mask_a)
 		else:
 			# Account for [CLS] and [SEP] with "- 2"
 			if len(tokens_a) > max_seq_length - 2:
 				tokens_a = tokens_a[0:(max_seq_length - 2)]
 				ner_labels_a = ner_labels_a[0:(max_seq_length - 2)]
+				ner_mask_a = ner_mask_a[0:(max_seq_length - 2)]
 
 		#print(f"Len of tokens_a == ner_label_a - {len(tokens_a)} vs {len(ner_labels_a)}")
 		#print(f"Len of tokens_a == ner_label_a - {tokens_a} vs {ner_labels_a}")
@@ -134,6 +141,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 		tokens.append("[CLS]")
 		segment_ids.append(0)
 		ner_label_ids.append(ner_label_map["[CLS]"])
+		ner_mask_a.insert(0, 1)
 		try:
 			for (i, token) in enumerate(tokens_a):
 				tokens.append(token)
@@ -148,7 +156,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 		#print(f"Len of tokens == ner_label_ids - {len(tokens)} vs {len(ner_label_ids)}")
 		#print(f"Len of tokens == ner_label_ids - {tokens} vs {ner_label_ids}")
 
-		ner_mask = [1] * len(ner_label_ids)
+		ner_mask = ner_mask_a
 		token_length = len(tokens)
 		tokens.append("[SEP]")
 		segment_ids.append(0)
@@ -205,7 +213,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 	return features, all_tokens
 
 
-def _truncate_seq_pair(tokens_a, tokens_b, ner_labels_a, max_length):
+def _truncate_seq_pair(tokens_a, tokens_b, ner_labels_a, max_length, ner_mask):
 	"""Truncates a sequence pair in place to the maximum length."""
 
 	# This is a simple heuristic which will always truncate the longer sequence
@@ -219,6 +227,7 @@ def _truncate_seq_pair(tokens_a, tokens_b, ner_labels_a, max_length):
 		if len(tokens_a) > len(tokens_b):
 			tokens_a.pop()
 			ner_labels_a.pop()
+			ner_mask.pop()
 		else:
 			tokens_b.pop()
 
