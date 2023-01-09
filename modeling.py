@@ -553,12 +553,14 @@ class BertForTABSAJoint_CRF(nn.Module):
 		# the CRF layer of NER labels
 		ner_loss_list = self.CRF_model(ner_logits, ner_labels, ner_mask.type(torch.ByteTensor).cuda(), reduction='none')
 		ner_loss = torch.mean(-ner_loss_list)
-		ner_predict = self.CRF_model.decode(ner_logits, ner_mask.type(torch.ByteTensor).cuda())
+		#ner_predict = self.CRF_model.decode(ner_logits, ner_mask.type(torch.ByteTensor).cuda())
+		ner_predict = self.CRF_model.decode(ner_logits.cuda())
 
 		# the classifier of category & polarity
 		loss_fct = CrossEntropyLoss()
 		loss = loss_fct(logits, labels)
 		return loss, ner_loss, logits, ner_predict
+
 
 #the model for ablation study, separate training
 # BERT + softmax

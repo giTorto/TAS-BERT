@@ -553,7 +553,6 @@ def main():
 					ner_label_ids = ner_label_ids.to('cpu').numpy()
 					ner_mask = ner_mask.to('cpu').numpy()
 
-
 					for output_i in range(len(outputs)):
 						# category & polarity
 						f_test.write(str(label_ids[output_i]))
@@ -569,6 +568,12 @@ def main():
 
 						for i in range(sentence_len):
 							if not ner_test_tokens[output_i][i].startswith('##'):
+								"""
+								print("OUTPUT_I", output_i, "I", i, "\n",
+									  "ner_test_tokens[output_i]", ner_test_tokens[output_i], len(ner_test_tokens[output_i]), "\n",
+									  "ner_label_ids[output_i]", ner_label_ids[output_i],len(ner_label_ids[output_i]), "\n",
+									  "ner_logits[output_i]", ner_logits[output_i], len(ner_logits[output_i]), "\n",
+								)"""
 								sentence_clean.append(ner_test_tokens[output_i][i])
 								label_true.append(ner_label_list[ner_label_ids[output_i][i]])
 								label_pre.append(ner_label_list[ner_logits[output_i][i]])

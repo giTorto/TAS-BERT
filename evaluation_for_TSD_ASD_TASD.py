@@ -355,11 +355,11 @@ def evaluate_TASD(path, epochs, tag_schema):
 			F = (2*P*R)/float(P+R) if P!=0 else 0
 
 			P_NULL = NULL_True_Num / float(NULL_Pre_Num) if NULL_Pre_Num != 0 else 0
-			R_NULL = NULL_True_Num / float(NULL_Gold_Num)
+			R_NULL = NULL_True_Num / float(NULL_Gold_Num) if NULL_Gold_Num != 0 else 0
 			F_NULL = (2*P_NULL*R_NULL)/float(P_NULL+R_NULL) if P_NULL!=0 else 0
 
 			P_NO_and_O = NO_and_O_True_Num / float(NO_and_O_Pre_Num) if NO_and_O_Pre_Num != 0 else 0
-			R_NO_and_O = NO_and_O_True_Num / float(NO_and_O_Gold_Num)
+			R_NO_and_O = NO_and_O_True_Num / float(NO_and_O_Gold_Num) if NO_and_O_Gold_Num != 0 else 0
 			F_NO_and_O = (2*P_NO_and_O*R_NO_and_O)/float(P_NO_and_O+R_NO_and_O) if P_NO_and_O!=0 else 0
 
 			if F > best_F1:
