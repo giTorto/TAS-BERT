@@ -422,7 +422,7 @@ def persist_prediction(output_dir, epoch, outputs, label_ids, ner_test_tokens, n
 			f_test.write("\n")
 
 
-def predict_on_test(test_dataloader, test_tokens, ner_label_list, model, epoch, device, output_dir, use_crf,
+def predict(test_dataloader, test_tokens, ner_label_list, model, epoch, device, output_dir, use_crf,
 					eval_batch_size):
 	model.eval()
 	test_loss, test_accuracy = 0, 0
@@ -504,6 +504,62 @@ def train_step(train_dataloader, device, model, n_gpu, gradient_accumulation_ste
 			global_step += 1
 
 
+def init_optimizer(model, num_train_steps, learning_rate, warmup_proportion):
+
+	no_decay = ['bias', 'gamma', 'beta']
+	optimizer_parameters = [
+		{'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+		 'weight_decay_rate': 0.01},
+		{'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+		 'weight_decay_rate': 0.0}
+	]
+
+	optimizer = BERTAdam(optimizer_parameters,
+						 lr=learning_rate,
+						 warmup=warmup_proportion,
+						 t_total=num_train_steps)
+
+	return optimizer
+
+
+def init_components(bert_config_file, max_seq_length, vocab_file, data_dir, tokenize_method, do_lower_case, use_crf,
+					init_checkpoint, device, alberto, local_rank, n_gpu):
+	bert_config = BertConfig.from_json_file(bert_config_file)
+
+	if max_seq_length > bert_config.max_position_embeddings:
+		raise ValueError(
+			"Cannot use sequence length {} because the BERT model was only trained up to sequence length {}".format(
+				max_seq_length, bert_config.max_position_embeddings))
+
+	processor = Semeval_Processor()
+	label_list = processor.get_labels()
+	ner_label_list = processor.get_ner_labels(data_dir)  # BIO or TO tags for ner entity
+
+	tokenizer = tokenization.FullTokenizer(
+		vocab_file=vocab_file, tokenize_method=tokenize_method, do_lower_case=do_lower_case,
+		do_basic_tokenize=False)
+
+	if use_crf:
+		model = BertForTABSAJoint_CRF(bert_config, len(label_list), len(ner_label_list))
+	else:
+		model = BertForTABSAJoint(bert_config, len(label_list), len(ner_label_list), max_seq_length)
+
+	if init_checkpoint is not None:
+		state_dict = torch.load(init_checkpoint, map_location='cpu')
+		if alberto:
+			state_dict = convert_alberto_state_dict_to_bert(state_dict)
+		model.bert.load_state_dict(state_dict)
+	model.to(device)
+
+	if local_rank != -1:
+		model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
+														  output_device=local_rank)
+	elif n_gpu > 1:
+		model = torch.nn.DataParallel(model)
+
+	return model, tokenizer, processor, tokenizer, label_list, ner_label_list
+
+
 def main():
 	parser = create_arg_parse()
 	args = parser.parse_args()
@@ -530,16 +586,10 @@ def main():
 	if n_gpu > 0:
 		torch.cuda.manual_seed_all(args.seed)
 
-	bert_config = BertConfig.from_json_file(args.bert_config_file)
-
-	if args.max_seq_length > bert_config.max_position_embeddings:
-		raise ValueError(
-			"Cannot use sequence length {} because the BERT model was only trained up to sequence length {}".format(
-				args.max_seq_length, bert_config.max_position_embeddings))
-
-	processor = Semeval_Processor()
-	label_list = processor.get_labels()
-	ner_label_list = processor.get_ner_labels(args.data_dir)  # BIO or TO tags for ner entity
+	model, tokenizer, processor, tokenizer, label_list, ner_label_list = \
+		init_components(args.bert_config_file, args.max_seq_length, args.vocab_file, args.data_dir, args.tokenize_method,
+					args.do_lower_case, args.use_crf,
+					args.init_checkpoint, device, args.alberto, args.local_rank, n_gpu)
 
 	tokenizer = tokenization.FullTokenizer(
 		vocab_file=args.vocab_file, tokenize_method=args.tokenize_method, do_lower_case=args.do_lower_case,
@@ -556,38 +606,7 @@ def main():
 	num_train_steps = int(
 		len(train_dataloader) / args.train_batch_size * args.num_train_epochs)
 
-	# model and optimizer
-
-	if args.use_crf:
-		model = BertForTABSAJoint_CRF(bert_config, len(label_list), len(ner_label_list))
-	else:
-		model = BertForTABSAJoint(bert_config, len(label_list), len(ner_label_list), args.max_seq_length)
-
-	if args.init_checkpoint is not None:
-		state_dict = torch.load(args.init_checkpoint, map_location='cpu')
-		if args.alberto:
-			state_dict = convert_alberto_state_dict_to_bert(state_dict)
-		model.bert.load_state_dict(state_dict)
-	model.to(device)
-
-	if args.local_rank != -1:
-		model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank],
-														  output_device=args.local_rank)
-	elif n_gpu > 1:
-		model = torch.nn.DataParallel(model)
-
-	no_decay = ['bias', 'gamma', 'beta']
-	optimizer_parameters = [
-		{'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-		 'weight_decay_rate': 0.01},
-		{'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-		 'weight_decay_rate': 0.0}
-	]
-
-	optimizer = BERTAdam(optimizer_parameters,
-						 lr=args.learning_rate,
-						 warmup=args.warmup_proportion,
-						 t_total=num_train_steps)
+	optimizer = init_optimizer(model, num_train_steps, args.learning_rate, args.warmup_proportion)
 
 	# train
 	output_log_file = os.path.join(args.output_dir, "log.txt")
@@ -608,32 +627,28 @@ def main():
 		nb_tr_examples, nb_tr_steps = 0, 0
 
 		train_step(train_dataloader, device, model, n_gpu, args.gradient_accumulation_steps, tr_loss, tr_ner_loss,
-				   nb_tr_examples, nb_tr_steps, optimizer, global_step)
+				nb_tr_examples, nb_tr_steps, optimizer, global_step)
 
-		result = collections.OrderedDict()
+		result = {'epoch': epoch,
+				  'global_step': global_step,
+				  'loss': tr_loss / nb_tr_steps,
+				  'ner_loss': tr_ner_loss / nb_tr_steps}
 
 		# eval_test
 		if args.eval_test:
-			test_dataloader, test_tokens = create_data_loader(
+			dev_dataloader, dev_tokens = create_data_loader(
 				args.data_dir, args.tokenize_method, args.max_seq_length, tokenizer, ner_label_list, label_list,
 				processor, args.eval_batch_size, data_type="test")
 
-			test_loss, ner_test_loss, test_accuracy = \
-				predict_on_test(test_dataloader, test_tokens, ner_label_list, model, epoch, device, args.output_dir,
+			dev_loss, ner_dev_loss, dev_accuracy = \
+				predict(dev_dataloader, dev_tokens, ner_label_list, model, epoch, device, args.output_dir,
 								args.use_crf, args.eval_batch_size)
 
-			result = {'epoch': epoch,
-					  'global_step': global_step,
-					  'loss': tr_loss / nb_tr_steps,
-					  'test_loss': test_loss,
-					  'ner_test_loss': ner_test_loss,
-					  'test_accuracy': test_accuracy}
-
-		else:
-			result = {'epoch': epoch,
-					  'global_step': global_step,
-					  'loss': tr_loss / nb_tr_steps,
-					  'ner_loss': tr_ner_loss / nb_tr_steps}
+			result.update({
+				'dev_loss': dev_loss,
+				'ner_dev_loss': ner_dev_loss,
+				'dev_accuracy': dev_accuracy
+			})
 
 		logger.info("***** Eval results *****")
 		with open(output_log_file, "a+") as writer:
