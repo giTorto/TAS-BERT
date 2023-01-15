@@ -81,7 +81,7 @@ def create_arg_parse():
 
     ## Other parameters
     parser.add_argument("--eval_test",
-                        default=True,
+                        default=False,
                         action='store_true',
                         help="Whether to run eval on the test set.")
     parser.add_argument("--do_lower_case",
@@ -485,8 +485,13 @@ def predict(test_dataloader, test_tokens, ner_label_list, model, epoch, device, 
     return test_loss, ner_test_loss, test_accuracy
 
 
-def train_step(train_dataloader, device, model, n_gpu, gradient_accumulation_steps, tr_loss, tr_ner_loss,
-               nb_tr_examples, nb_tr_steps, optimizer, global_step):
+def train_step(train_dataloader, device, model, n_gpu, gradient_accumulation_steps, optimizer, global_step):
+    model.train()
+
+    tr_loss = 0
+    tr_ner_loss = 0
+    nb_tr_examples, nb_tr_steps = 0, 0
+
     for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
         batch = tuple(t.to(device) for t in batch)
         input_ids, input_mask, segment_ids, label_ids, ner_label_ids, ner_mask = batch
@@ -509,6 +514,13 @@ def train_step(train_dataloader, device, model, n_gpu, gradient_accumulation_ste
             optimizer.step()  # We have accumulated enought gradients
             model.zero_grad()
             global_step += 1
+
+    result = {
+     'global_step': global_step,
+     'loss': tr_loss / nb_tr_steps,
+     'ner_loss': tr_ner_loss / nb_tr_steps}
+
+    return result
 
 
 def init_optimizer(model, num_train_steps, learning_rate, warmup_proportion):
@@ -600,24 +612,16 @@ def train(model, train_dataloader, optimizer, patience, num_train_epochs, output
 
     global_step = 0
     epoch = 0
-    track_performance = []
     last_best = {}
     patience = patience
     changes_counter = 0
     for _ in trange(int(num_train_epochs), desc="Epoch"):
         epoch += 1
-        model.train()
-        tr_loss = 0
-        tr_ner_loss = 0
-        nb_tr_examples, nb_tr_steps = 0, 0
 
-        train_step(train_dataloader, device, model, n_gpu, gradient_accumulation_steps, tr_loss, tr_ner_loss,
-                   nb_tr_examples, nb_tr_steps, optimizer, global_step)
+        result = \
+            train_step(train_dataloader, device, model, n_gpu, gradient_accumulation_steps, optimizer, global_step)
 
-        result = {'epoch': epoch,
-                  'global_step': global_step,
-                  'loss': tr_loss / nb_tr_steps,
-                  'ner_loss': tr_ner_loss / nb_tr_steps}
+        result['epoch'] = epoch
 
         # eval_test
         if eval_test:
@@ -631,7 +635,6 @@ def train(model, train_dataloader, optimizer, patience, num_train_epochs, output
                 'dev_accuracy': dev_accuracy
             })
 
-        track_performance.append(result)
         prev_best = copy.copy(last_best)
         last_best, changed = compute_best_epoch(last_best, result)
 
@@ -647,7 +650,8 @@ def train(model, train_dataloader, optimizer, patience, num_train_epochs, output
                 'loss': result.get("loss"),
                 'path': out_path
             }, out_path)
-            os.remove(prev_best.get("path"))
+            if prev_best.get("path") is not None:
+                os.remove(prev_best.get("path"))
 
         logger.info(f"Last best: {last_best} and changes_counter:{changes_counter}")
         logger.info("***** Eval results *****")
@@ -720,13 +724,12 @@ def main():
     optimizer = init_optimizer(model, num_train_steps, args.learning_rate, args.warmup_proportion)
 
     # train
-    last_best = train(model, train_dataloader, optimizer, args.patience, args.num_train_epochs, args.output_dir,
-                      args.eval_test, n_gpu, device,
-                      args.gradient_accumulation_steps, dev_dataloader, dev_tokens, ner_label_list,
-                      args.eval_batch_size, args.use_crf)
+    last_best = train(model, train_dataloader, optimizer, args.patience, args.num_train_epochs, args.output_dir, args.eval_test, n_gpu, device,
+          args.gradient_accumulation_steps, dev_dataloader, dev_tokens, ner_label_list, args.eval_batch_size, args.use_crf)
 
     final_model = last_best.get("path")
-    checkpoint = torch.load(final_model)
+    with open(final_model, 'r') as in_file:
+        checkpoint = torch.load(final_model)
 
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
